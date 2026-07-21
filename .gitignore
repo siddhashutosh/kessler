@@ -31,3 +31,6 @@ Thumbs.db
 packages/kessler-toolkit/dist/
 packages/kessler-toolkit/build/
 *.egg-info/
+
+# secrets
+.pypi-token

@@ -4,6 +4,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776ab.svg)](backend/requirements.txt)
 [![Tests](https://img.shields.io/badge/tests-50%20passing-3ddc84.svg)](backend/tests)
+[![PyPI](https://img.shields.io/pypi/v/kessler-toolkit.svg)](https://pypi.org/project/kessler-toolkit/)
 
 **Open Orbital Conjunction Assessment & Risk Toolkit** — an open-source pipeline that ingests
 public space-surveillance data (Conjunction Data Messages + GP orbital elements), computes and
