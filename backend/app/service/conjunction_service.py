@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core.config import settings
@@ -67,6 +68,12 @@ class ConjunctionService:
         self.spacetrack = SpaceTrackClient()
         self.insight = InsightService()
         self._generated_at: datetime | None = None
+        # in-process catalogue cache: parsing 12k OMM records from the SQLite
+        # JSON payload per request OOM'd a 414 MB host — parse once per TTL
+        self._catalog_mem: list[dict] | None = None
+        self._catalog_index: dict[str, dict] = {}
+        self._catalog_loaded_at: datetime | None = None
+        self._catalog_lock = threading.Lock()
 
     # --------------------------------------------------------------- mode
     @property
@@ -86,13 +93,29 @@ class ConjunctionService:
 
     # ------------------------------------------------------------ ingestion
     def load_catalog(self) -> list[dict]:
-        if self.data_mode == "demo":
-            return self._load_sample("sample_gp.json")
-        return self.cache.get_or_fetch(
-            "gp:active",
-            settings.gp_ttl_seconds,
-            lambda: self.celestrak.fetch_group("active"),
-        )
+        with self._catalog_lock:
+            fresh = (
+                self._catalog_mem is not None
+                and self._catalog_loaded_at is not None
+                and datetime.now(timezone.utc) - self._catalog_loaded_at
+                < timedelta(seconds=settings.gp_ttl_seconds)
+            )
+            if fresh:
+                return self._catalog_mem  # type: ignore[return-value]
+            if self.data_mode == "demo":
+                catalog = self._load_sample("sample_gp.json")
+            else:
+                catalog = self.cache.get_or_fetch(
+                    "gp:active",
+                    settings.gp_ttl_seconds,
+                    lambda: self.celestrak.fetch_group("active"),
+                )
+            self._catalog_mem = catalog
+            self._catalog_index = {
+                str(omm.get("NORAD_CAT_ID")): omm for omm in catalog
+            }
+            self._catalog_loaded_at = datetime.now(timezone.utc)
+            return catalog
 
     def load_raw_cdms(self) -> list[dict]:
         if self.data_mode == "demo":
@@ -247,21 +270,27 @@ class ConjunctionService:
 
     # ------------------------------------------------------------ satellites
     def find_omm(self, norad_id: str) -> dict:
-        catalog = self.load_catalog()
-        for omm in catalog:
-            if str(omm.get("NORAD_CAT_ID")) == str(norad_id):
-                return omm
+        self.load_catalog()  # ensures the index is populated/fresh
+        omm = self._catalog_index.get(str(norad_id))
+        if omm is not None:
+            return omm
         if self.data_mode == "live":
             # debris/rocket bodies live outside the 'active' group — fetch
-            # individually from CelesTrak, cached under the same GP TTL
+            # individually from CelesTrak, caching misses too so repeated UI
+            # polls can't stampede the network (this stampede OOM'd the VPS)
+            key = f"gp:catnr:{norad_id}"
+            cached = self.cache.get(key)
+            if cached is not None:
+                if cached.get("__absent__"):
+                    raise NotFoundError(f"NORAD {norad_id} not in loaded catalogue")
+                return cached
             try:
-                return self.cache.get_or_fetch(
-                    f"gp:catnr:{norad_id}",
-                    settings.gp_ttl_seconds,
-                    lambda: self.celestrak.fetch_single(norad_id),
-                )
+                fetched = self.celestrak.fetch_single(norad_id)
+                self.cache.put(key, fetched, settings.gp_ttl_seconds)
+                return fetched
             except (DataSourceError, RateLimitError) as exc:
                 logger.warning("Per-object GP fetch failed for %s: %s", norad_id, exc)
+                self.cache.put(key, {"__absent__": True}, 6 * 3600)
         raise NotFoundError(f"NORAD {norad_id} not in loaded catalogue")
 
     def track(self, norad_id: str, minutes: int, step_s: int) -> dict:
