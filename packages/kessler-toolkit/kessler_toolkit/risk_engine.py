@@ -1,3 +1,4 @@
+# GENERATED from backend/app/logic — edit there, then run packages/sync.py
 """Risk classification, urgency scoring, recommended actions (FR-RSK)."""
 from __future__ import annotations
 

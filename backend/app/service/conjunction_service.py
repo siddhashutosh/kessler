@@ -184,7 +184,8 @@ class ConjunctionService:
             cdm.miss_distance_m, cdm.covariance_available,
         )
         urgency = risk_engine.urgency(risk, cdm.tca, cdm.created)
-        action = risk_engine.recommend(risk, cdm.tca, cdm.covariance_available)
+        action = risk_engine.recommend(risk, cdm.tca, cdm.covariance_available,
+                                       pc_type=pc_result.pc_type)
         return {
             "event_id": cdm.cdm_id,
             "tca": cdm.tca.isoformat(),
@@ -250,6 +251,17 @@ class ConjunctionService:
         for omm in catalog:
             if str(omm.get("NORAD_CAT_ID")) == str(norad_id):
                 return omm
+        if self.data_mode == "live":
+            # debris/rocket bodies live outside the 'active' group — fetch
+            # individually from CelesTrak, cached under the same GP TTL
+            try:
+                return self.cache.get_or_fetch(
+                    f"gp:catnr:{norad_id}",
+                    settings.gp_ttl_seconds,
+                    lambda: self.celestrak.fetch_single(norad_id),
+                )
+            except (DataSourceError, RateLimitError) as exc:
+                logger.warning("Per-object GP fetch failed for %s: %s", norad_id, exc)
         raise NotFoundError(f"NORAD {norad_id} not in loaded catalogue")
 
     def track(self, norad_id: str, minutes: int, step_s: int) -> dict:

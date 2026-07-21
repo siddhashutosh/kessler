@@ -54,10 +54,18 @@ class TestUrgency:
 
 class TestRecommend:
     def test_critical_mentions_operator_cdm(self):
-        text = risk_engine.recommend("CRITICAL", NOW + timedelta(hours=20), False, now=NOW)
+        text = risk_engine.recommend("CRITICAL", NOW + timedelta(hours=20), False,
+                                     now=NOW, pc_type="max")
         assert "operator" in text.lower()
         assert "upper bound" in text
 
+    def test_reported_pc_without_covariance_notes_source(self):
+        text = risk_engine.recommend("CRITICAL", NOW + timedelta(hours=20), False,
+                                     now=NOW, pc_type="reported")
+        assert "upper bound" not in text
+        assert "source-reported" in text
+
     def test_covariance_available_omits_bound_note(self):
-        text = risk_engine.recommend("MONITOR", NOW + timedelta(hours=20), True, now=NOW)
+        text = risk_engine.recommend("MONITOR", NOW + timedelta(hours=20), True,
+                                     now=NOW, pc_type="computed")
         assert "upper bound" not in text
