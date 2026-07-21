@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kessler-toolkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Open conjunction assessment: CCSDS CDM parsing, collision probability (Foster/Chan/Max-Pc), SGP4 screening, and risk triage — pure Python."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.9"
-authors = [{ name = "Ashutosh", email = "siddhvasudev1402@gmail.com" }]
+authors = [{ name = "Ashutosh", email = "siddhashutosh@gmail.com" }]
 keywords = [
   "astrodynamics", "conjunction-assessment", "collision-probability",
   "space-debris", "CDM", "CCSDS", "SGP4", "space-traffic-management", "SSA",

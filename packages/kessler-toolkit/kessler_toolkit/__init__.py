@@ -27,7 +27,7 @@ from kessler_toolkit.propagation import (
 from kessler_toolkit.risk_engine import classify, recommend, urgency
 from kessler_toolkit.screening import CloseApproachHit, altitude_band, screen
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Cdm", "CdmObject", "parse_cdm_kvn", "parse_cdm_public_row",
