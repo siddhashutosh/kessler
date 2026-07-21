@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KESSLER — Low-Level Design</title>
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<div class="cover">
+  <div class="project">KESSLER</div>
+  <div class="doctitle">Low-Level Design (LLD)</div>
+  <div class="meta">
+    <span><b>Document ID:</b> KSL-LLD-001</span>
+    <span><b>Version:</b> 1.0</span>
+    <span><b>Date:</b> 21 July 2026</span>
+    <span><b>Traces to:</b> KSL-HLD-001, KSL-SRS-001</span>
+  </div>
+</div>
+
+<h1>1. Repository Layout</h1>
+<pre>
+kessler/
+├── documents/            SRS/HLD/LLD (src html + pdf), diagrams/, qa-report
+├── backend/
+│   ├── requirements.txt  fastapi, uvicorn, pydantic-settings, sgp4, numpy, httpx, pytest, anthropic(optional)
+│   ├── logs/             kessler.log (rotating, git-ignored)
+│   └── app/
+│       ├── main.py       app factory, middleware, handlers, startup pipeline
+│       ├── core/         config.py · logging_config.py · exceptions.py
+│       ├── models/       schemas.py (Pydantic v2 DTOs)
+│       ├── logic/        cdm_parser.py · propagation.py · collision_probability.py
+│       │                 · screening.py · risk_engine.py         [pure, no I/O]
+│       ├── service/      celestrak_client.py · spacetrack_client.py · cache_service.py
+│       │                 · conjunction_service.py · pipeline_service.py · insight_service.py
+│       ├── api/          routes.py
+│       └── data/         sample_gp.json · sample_cdms.json · cache.db (runtime)
+├── backend/tests/        test_collision_probability.py · test_cdm_parser.py
+│                         · test_screening.py · test_risk_engine.py · test_api.py
+└── ui/                   Vite + React + TS (src/api, src/components, src/pages, src/styles)
+</pre>
+
+<h1>2. Core (app/core)</h1>
+<h2>2.1 config.py</h2>
+<pre>
+class Settings(BaseSettings):            # env prefix KESSLER_, .env supported
+    app_name: str = "KESSLER"
+    demo_mode: bool | None = None        # None → auto: demo iff no spacetrack creds
+    spacetrack_user: str | None = None
+    spacetrack_pass: str | None = None
+    anthropic_api_key: str | None = None
+    data_dir: Path = &lt;backend&gt;/app/data
+    log_dir: Path = &lt;backend&gt;/logs
+    gp_ttl_seconds: int = 3600           # CON-1: never refetch GP inside 1 h
+    cdm_ttl_seconds: int = 1800
+    screening_max_window_hours: int = 72
+    default_hbr_m: float = 20.0
+settings = Settings()                    # imported everywhere; test-overridable
+</pre>
+<h2>2.2 exceptions.py</h2>
+<table>
+  <tr><th>Class</th><th>code</th><th>HTTP</th><th>Raised by</th></tr>
+  <tr><td class="mono">KesslerError(base)</td><td>KESSLER_ERROR</td><td>500</td><td>—</td></tr>
+  <tr><td class="mono">ConfigError</td><td>CONFIG_ERROR</td><td>500</td><td>core/service init</td></tr>
+  <tr><td class="mono">DataSourceError</td><td>DATA_SOURCE_ERROR</td><td>502</td><td>celestrak/spacetrack clients</td></tr>
+  <tr><td class="mono">RateLimitError</td><td>RATE_LIMITED</td><td>503</td><td>spacetrack throttle guard</td></tr>
+  <tr><td class="mono">CdmParseError</td><td>CDM_PARSE_ERROR</td><td>422</td><td>logic/cdm_parser</td></tr>
+  <tr><td class="mono">PropagationError</td><td>PROPAGATION_ERROR</td><td>500</td><td>logic/propagation, screening</td></tr>
+  <tr><td class="mono">NotFoundError</td><td>NOT_FOUND</td><td>404</td><td>services/API</td></tr>
+</table>
+<p>Global FastAPI handlers convert <code>KesslerError</code> → envelope
+<code>{"error":{"code","message","detail","request_id"}}</code>; a catch-all handler maps any other
+exception to 500 <code>INTERNAL_ERROR</code> after logging with stack trace (NFR-1).</p>
+<h2>2.3 logging_config.py</h2>
+<pre>
+FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | rid=%(request_id)s | %(message)s"
+setup_logging(): console handler (INFO) + RotatingFileHandler(logs/kessler.log, 5MB, 3 backups)
+RequestIdFilter injects request_id (contextvar set by middleware; "-" outside requests)
+</pre>
+
+<h1>3. Logic Layer (app/logic) — algorithms</h1>
+
+<h2>3.1 cdm_parser.py</h2>
+<pre>
+@dataclass CdmObject: designator, name, object_type, r_rtn: vec3|None,
+                      v_rtn: vec3|None, cov_rtn: 3x3|None      # metres, m/s, m²
+@dataclass Cdm: cdm_id, created, tca: datetime, miss_distance_m, relative_speed_ms,
+                sat1: CdmObject, sat2: CdmObject, pc_reported: float|None,
+                emergency_reportable: bool, source: str, raw: dict
+
+parse_cdm_kvn(text: str) -> Cdm          # CCSDS 508.0-B-1 KVN: header → relative
+                                         # metadata → OBJECT1/OBJECT2 blocks (state+cov)
+parse_cdm_public_row(row: dict) -> Cdm   # Space-Track cdm_public JSON row
+                                         # (CDM_ID, CREATED, TCA, MIN_RNG, PC,
+                                         #  SAT_1_ID, SAT_1_NAME, SAT1_OBJECT_TYPE, …)
+</pre>
+<p>Validation: TCA parseable and TZ-aware, both designators present, numeric fields finite,
+covariance symmetric-PSD when supplied (symmetrised; non-PSD → flagged, dropped to max-Pc path).
+All violations accumulated then raised in one <code>CdmParseError(detail=[...])</code> (FR-CDM-3).</p>
+
+<h2>3.2 propagation.py</h2>
+<pre>
+load_satrec(omm: dict) -> Satrec                     # sgp4.exporter-compatible OMM load
+state_teme(sat, t: datetime) -> (r_km, v_kms)        # raises PropagationError on sgp4 code≠0
+sample_range(satA, satB, t0, t1, step_s) -> ndarray  # vectorised |rA-rB| over window
+refine_tca(satA, satB, t_guess, half_window_s=90) -> (tca, miss_m, rel_speed)
+    # golden-section minimisation of range(t), tol 0.25 s → then quadratic fit for sub-s TCA
+</pre>
+
+<h2>3.3 collision_probability.py — the mathematical core (FR-PC)</h2>
+<pre>
+encounter_plane_projection(r_rel, v_rel, cov1, cov2) -> (mu_2d, C_2d)
+    # 1. combined covariance C = cov1 + cov2 (independent errors)
+    # 2. basis: ez = v_rel/|v_rel|; ex = r_rel − (r_rel·ez)ez, normalised; ey = ez × ex
+    # 3. project miss vector and C into (ex, ey) plane → mu (2,), C_2d (2×2)
+
+pc_foster(mu, C, hbr_m, n_r=60, n_theta=90) -> float
+    # numerical polar integration of bivariate Gaussian over disc radius=hbr
+    # Pc = ∬ N(x; mu, C) dA, midpoint rule in (r, θ); relative err &lt; 1e-3 for n defaults
+
+pc_chan(mu, C, hbr_m, terms=20) -> float
+    # Chan (2008) equivalent-area series: transform to isotropic space,
+    # u = hbr²/(σx·σy·…), v = miss²…; Pc = e^{−v/2} Σ (v/2)^m/m! · [1 − e^{−u/2} Σ…]
+
+pc_max(miss_m, hbr_m) -> float
+    # covariance-free conservative bound (Alfano style):
+    # maximise isotropic-σ Pc over σ → σ* = miss/√2 → Pc_max = (hbr²/miss²)·e^{−1}
+    # (clipped to 1; documented as triage-grade upper bound)
+
+compute_pc(cdm, hbr_m) -> PcResult(pc, method, cross_check, divergence_flag, pc_type)
+    # dispatch: covariance → foster + chan cross-check (|Δ|/max &gt; 5% ⇒ flag)
+    #           no covariance → pc_max, pc_type="max"
+</pre>
+
+<h2>3.4 screening.py</h2>
+<pre>
+screen(asset_omm, catalog: list[omm], window_h, threshold_km=10) -> list[CloseApproach]
+  Step 1  altitude sieve: skip object if [perigee,apogee] bands are &gt; threshold apart
+  Step 2  coarse scan: shared time grid (60 s), vectorised ranges; local minima &lt; 5×threshold
+  Step 3  refine each candidate with refine_tca(); keep miss ≤ threshold
+  Step 4  annotate RTN components of miss vector, rel speed, pc_max
+</pre>
+
+<h2>3.5 risk_engine.py</h2>
+<pre>
+classify(pc, pc_type, miss_m, cov_available) -> RiskClass   # FR-RSK-1 thresholds
+urgency(risk, tca, created) -> float 0..100
+    # base by class (CRITICAL 70) + up to 20 for time-to-TCA &lt; 24 h + up to 10 for stale data
+recommend(risk, tca, cov_available) -> str                  # deterministic action text
+</pre>
+
+<h1>4. Data Design — SQLite DDL</h1>
+<pre>
+CREATE TABLE IF NOT EXISTS kv_cache (
+  key TEXT PRIMARY KEY, payload TEXT NOT NULL,          -- JSON
+  fetched_at TEXT NOT NULL, ttl_seconds INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS events (
+  event_id TEXT PRIMARY KEY, tca TEXT NOT NULL, risk TEXT NOT NULL,
+  urgency REAL NOT NULL, document TEXT NOT NULL,        -- enriched event JSON
+  updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_events_urgency ON events(urgency DESC);
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL,
+  started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
+  items INTEGER DEFAULT 0, error TEXT);
+</pre>
+
+<h1>5. API Contract (app/api/routes.py)</h1>
+<table>
+  <tr><th>Method &amp; Path</th><th>Query/body</th><th>200 response (summary)</th></tr>
+  <tr><td class="mono">GET /api/v1/health</td><td>—</td><td>{status, version, data_mode, uptime_s}</td></tr>
+  <tr><td class="mono">GET /api/v1/conjunctions</td><td>limit≤100, min_risk</td><td>{data_mode, generated_at, events:[EventSummary]} sorted by urgency</td></tr>
+  <tr><td class="mono">GET /api/v1/conjunctions/{event_id}</td><td>—</td><td>EventDetail: cdm, pc{value,method,cross_check,divergence,type}, risk, urgency, action, geometry{r_rtn, miss_rtn}</td></tr>
+  <tr><td class="mono">GET /api/v1/conjunctions/{event_id}/insight</td><td>—</td><td>{briefing, source:"ai"|"template"}</td></tr>
+  <tr><td class="mono">GET /api/v1/satellites/{norad}/track</td><td>minutes≤360, step_s≥10</td><td>{norad, name, points:[{t, lat, lon, alt_km, r_eci_km}]}</td></tr>
+  <tr><td class="mono">POST /api/v1/screening/run</td><td>{norad_id, window_hours≤72, threshold_km}</td><td>{asset, window, candidates:[CloseApproach]}</td></tr>
+  <tr><td class="mono">GET /api/v1/pipeline/status</td><td>—</td><td>{agents:[{id,name,status,last_run,duration_ms,items,error}]}</td></tr>
+  <tr><td class="mono">GET /api/v1/catalog</td><td>q, limit</td><td>[{norad, name, object_type, apogee_km, perigee_km, inclination_deg}]</td></tr>
+</table>
+<p>422 validation errors are re-shaped into the standard envelope by an override of FastAPI's
+<code>RequestValidationError</code> handler; every response carries <code>X-Request-Id</code>.</p>
+
+<h1>6. Service Layer Detail</h1>
+<h2>6.1 spacetrack_client.py — rate-limit governor</h2>
+<pre>
+class SpaceTrackClient:
+    MIN_INTERVAL_S = 3.0          # ≥ 3 s between calls ⇒ &lt; 20/min (CON-1 margin)
+    HOURLY_BUDGET  = 250          # &lt; 300/hr with margin
+    async login()                 # POST /ajaxauth/login, session cookie
+    async fetch_cdm_public(limit=200) -> list[dict]
+        # /basicspacedata/query/class/cdm_public/orderby/TCA asc/limit/{n}/format/json
+    async fetch_gp(norad_ids)     # only if cache-miss AND ttl expired (guarded by cache_service)
+    # every call: acquire throttle lock → check budget → httpx call (timeout 30 s,
+    # 2 retries exp backoff) → on 401 re-login once → errors → DataSourceError/RateLimitError
+</pre>
+<h2>6.2 conjunction_service.py — pipeline orchestration (sequence)</h2>
+<pre>
+refresh_pipeline():                                  # startup + scheduled
+  1 pipeline.start("catalog_sync") → gp = cache.get_or_fetch("gp:active", loader)
+  2 pipeline.start("cdm_ingest")   → raw = cache.get_or_fetch("cdm:latest", loader|demo)
+  3 pipeline.start("parse")        → cdms = [parse_cdm_public_row(r)] ; quarantine failures
+  4 pipeline.start("pc_engine")    → for each: compute_pc(cdm, settings.default_hbr_m)
+  5 pipeline.start("risk")         → classify + urgency + recommend (+ insight lazily)
+  6 pipeline.start("publish")      → upsert events table; snapshot generated_at
+  each stage: try/except → pipeline.finish(status, items, error); stage failure uses
+  last-known-good data and marks agent "degraded" — pipeline never aborts the app.
+</pre>
+<h2>6.3 insight_service.py</h2>
+<p>If <code>anthropic_api_key</code> set: Claude Messages API call (short, temperature 0.2,
+max_tokens 400) with event JSON context → analyst briefing; 10 s timeout; on any exception log
+WARN and return template briefing (<code>source:"template"</code>). Never raises to caller (FR-RSK-4).</p>
+
+<h1>7. UI Design (ui/)</h1>
+<table>
+  <tr><th>Module</th><th>Detail</th></tr>
+  <tr><td class="mono">src/api/client.ts</td><td>fetch wrapper: JSON, error-envelope unwrap → typed <code>ApiError</code>; abortable; single retry on 5xx.</td></tr>
+  <tr><td class="mono">src/types.ts</td><td>TS mirrors of Pydantic DTOs (EventSummary, EventDetail, PipelineAgent, TrackPoint…).</td></tr>
+  <tr><td class="mono">components/Globe3D.tsx</td><td>R3F canvas: Earth sphere (custom gradient material + atmosphere rim), star-free deep background, orbit polylines (satellite.js propagation client-side, 1 orbit period, 256 segments), TCA marker + miss-vector line for selected event; OrbitControls (damped).</td></tr>
+  <tr><td class="mono">components/EventList.tsx</td><td>Urgency-sorted table: risk chip, Pc (scientific), miss km, rel speed km/s, TCA countdown; row select → focus.</td></tr>
+  <tr><td class="mono">components/EventDetail.tsx</td><td>Panel: objects, Pc block (method, cross-check, divergence flag, pc_type), RTN miss components bar, action, AI/template briefing.</td></tr>
+  <tr><td class="mono">pages/PipelinePage.tsx</td><td>Embeds <code>public/diagrams/pipeline-flow.html</code> (iframe) and polls <code>/pipeline/status</code> every 5 s, posting status into the iframe (postMessage) to light up nodes.</td></tr>
+  <tr><td class="mono">styles/</td><td>Design tokens: bg #05070d, panel rgba(13,18,32,.85), accent cyan #59d8ff, alert amber #ffb454, critical #ff5d5d, mono numerals (font-variant-numeric: tabular-nums). No decorative patterns (FR-UI-4).</td></tr>
+</table>
+
+<h1>8. Test Plan</h1>
+<table>
+  <tr><th>Suite</th><th>Cases</th></tr>
+  <tr><td class="mono">test_collision_probability</td><td>isotropic closed-form vs Foster (&lt;1e-3 rel); Foster vs Chan agreement on reference geometries; max-Pc bound ≥ both methods for matched miss/HBR; degenerate covariance → max-Pc fallback; Pc→0 for huge miss; Pc→~1 for tiny miss with tight covariance.</td></tr>
+  <tr><td class="mono">test_cdm_parser</td><td>KVN fixture round-trip; cdm_public row fixture; missing TCA/designator → CdmParseError listing both; non-PSD covariance flagged.</td></tr>
+  <tr><td class="mono">test_screening</td><td>synthetic co-planar pair with engineered close pass detected within 1 s of truth; altitude sieve excludes disjoint orbit; empty-catalogue no-op.</td></tr>
+  <tr><td class="mono">test_risk_engine</td><td>threshold boundaries (1e-4, 1e-5, 1e-7); miss&lt;1 km escalation without covariance; urgency monotonic in Pc and time-to-TCA.</td></tr>
+  <tr><td class="mono">test_api</td><td>TestClient: /health; /conjunctions contract + sort; unknown event → 404 envelope; screening validation (window &gt; 72 → 422 envelope); pipeline status shape.</td></tr>
+</table>
+
+<footer>KESSLER · KSL-LLD-001 v1.0 · Traces: KSL-HLD-001, KSL-SRS-001.</footer>
+</body>
+</html>

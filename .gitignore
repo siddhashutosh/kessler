@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Env & secrets
+.env
+.env.local
+*.pem
+
+# Runtime artifacts
+backend/logs/*.log
+backend/app/data/cache.db
+backend/app/data/cache.db-*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

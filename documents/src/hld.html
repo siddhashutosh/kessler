@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KESSLER — High-Level Design</title>
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<div class="cover">
+  <div class="project">KESSLER</div>
+  <div class="doctitle">High-Level Design (HLD)</div>
+  <div class="meta">
+    <span><b>Document ID:</b> KSL-HLD-001</span>
+    <span><b>Version:</b> 1.0</span>
+    <span><b>Date:</b> 21 July 2026</span>
+    <span><b>Traces to:</b> KSL-SRS-001</span>
+  </div>
+</div>
+
+<h1>1. System Overview</h1>
+<p>KESSLER is a two-tier web system — a Python computation/orchestration backend and a React 3D
+frontend — arranged around a <b>cache-first data pipeline</b>. External space-surveillance sources
+are polled on schedule (never per user request), normalised into a local store, enriched by the
+risk engine, and served to clients. The pipeline is modelled as six named <b>agents</b>; the same
+agent graph is rendered as the n8n-style diagram shipped in <code>documents/diagrams/</code> and
+embedded live in the UI's Pipeline page.</p>
+
+<h1>2. Architecture</h1>
+<div class="diagram">
+┌────────────────────────────  EXTERNAL (free, public)  ────────────────────────────┐
+│   CelesTrak gp.php (OMM/JSON)      Space-Track cdm_public (JSON, auth+rate-limit) │
+│   [no auth]                        [cache-first, 30/min·300/hr respected]         │
+└──────────────┬─────────────────────────────────┬──────────────────────────────────┘
+               │                                 │
+┌──────────────▼─────────────────────────────────▼──────────────────────────────────┐
+│  BACKEND  (Python 3.11 · FastAPI · uvicorn)                       backend/        │
+│                                                                                   │
+│   SERVICE LAYER  app/service/          ── orchestration, I/O, caching             │
+│   ┌──────────────┐ ┌──────────────┐ ┌───────────────┐ ┌──────────────────────┐    │
+│   │ celestrak_   │ │ spacetrack_  │ │ cache_service │ │ conjunction_service  │    │
+│   │ client       │ │ client       │ │ (SQLite+TTL)  │ │ (pipeline orchestr.) │    │
+│   └──────────────┘ └──────────────┘ └───────────────┘ └──────────────────────┘    │
+│   ┌──────────────┐ ┌────────────────────┐                                         │
+│   │ pipeline_    │ │ insight_service    │  optional AI briefing (Claude API),     │
+│   │ service      │ │ (graceful fallback)│  disabled without ANTHROPIC_API_KEY     │
+│   └──────────────┘ └────────────────────┘                                         │
+│                                                                                   │
+│   LOGIC LAYER  app/logic/              ── pure functions, no I/O                  │
+│   ┌────────────┐ ┌──────────────┐ ┌───────────────────────┐ ┌──────────────┐      │
+│   │ cdm_parser │ │ propagation  │ │ collision_probability │ │ risk_engine  │      │
+│   │ (KVN/JSON) │ │ (SGP4+refine)│ │ (Foster·Chan·MaxPc)   │ │ (class+score)│      │
+│   └────────────┘ └──────────────┘ └───────────────────────┘ └──────────────┘      │
+│                       ┌────────────┐                                              │
+│                       │ screening  │  altitude sieve → coarse scan → refine       │
+│                       └────────────┘                                              │
+│                                                                                   │
+│   API LAYER  app/api/routes.py   ·   CORE  app/core/ (config·logging·exceptions)  │
+└──────────────────────────────────────┬────────────────────────────────────────────┘
+                                       │  REST /api/v1  (JSON, error envelope)
+┌──────────────────────────────────────▼────────────────────────────────────────────┐
+│  UI  (React 18 · TypeScript · Vite · Three.js/R3F · satellite.js)      ui/        │
+│   Dashboard (3D Earth + event list) · Event Detail · Pipeline (n8n diagram, live) │
+└───────────────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h2>2.1 Component Responsibilities</h2>
+<table>
+  <tr><th>Component</th><th>Layer</th><th>Responsibility</th><th>Key SRS trace</th></tr>
+  <tr><td class="mono">celestrak_client</td><td>service</td><td>Fetch OMM JSON groups (active, stations, custom NORAD sets); retry with backoff; typed <code>DataSourceError</code> on failure.</td><td>FR-ING-1</td></tr>
+  <tr><td class="mono">spacetrack_client</td><td>service</td><td>Authenticated session; enforced min-interval throttle + hourly budget; <code>cdm_public</code> and <code>gp</code> queries; hard-disabled without credentials.</td><td>FR-ING-2, CON-1</td></tr>
+  <tr><td class="mono">cache_service</td><td>service</td><td>SQLite-backed key/TTL store for GP sets and CDM batches; last-known-good fallback; swap-out point for AWS.</td><td>FR-ING-3/5, NFR-5</td></tr>
+  <tr><td class="mono">conjunction_service</td><td>service</td><td>Pipeline orchestrator: load (live|demo) → parse → Pc → risk → persist snapshot; exposes read model to API.</td><td>FR-CDM-*, FR-RSK-*</td></tr>
+  <tr><td class="mono">pipeline_service</td><td>service</td><td>Tracks per-agent stage status/timings/counters powering the live diagram.</td><td>FR-UI-3</td></tr>
+  <tr><td class="mono">insight_service</td><td>service</td><td>Optional Claude-generated analyst briefing; deterministic template fallback.</td><td>FR-RSK-4</td></tr>
+  <tr><td class="mono">cdm_parser</td><td>logic</td><td>CCSDS KVN + cdm_public JSON → typed <code>Cdm</code>; strict validation.</td><td>FR-CDM-1..4</td></tr>
+  <tr><td class="mono">propagation</td><td>logic</td><td>SGP4 wrapper (TEME), state sampling, TCA refinement via bounded minimisation.</td><td>FR-SCR-3</td></tr>
+  <tr><td class="mono">collision_probability</td><td>logic</td><td>Encounter-plane projection; Foster 2D numerical Pc; Chan analytic series; conservative max-Pc.</td><td>FR-PC-1..5</td></tr>
+  <tr><td class="mono">screening</td><td>logic</td><td>Catalogue screening: altitude-band sieve → coarse sampling → refinement.</td><td>FR-SCR-1..5</td></tr>
+  <tr><td class="mono">risk_engine</td><td>logic</td><td>Risk classification, urgency scoring, recommended actions.</td><td>FR-RSK-1..3</td></tr>
+</table>
+
+<h2>2.2 The Agent Pipeline</h2>
+<p>The runtime data flow is modelled as six agents; each maps to concrete modules above. This is
+the graph shown in the n8n-style diagram (KSL-DIA-001):</p>
+<table>
+  <tr><th>#</th><th>Agent</th><th>Trigger</th><th>Function</th></tr>
+  <tr><td>1</td><td><b>Catalog Sync</b></td><td>Startup + hourly</td><td>Pull OMM catalogue (CelesTrak / demo file) → cache.</td></tr>
+  <tr><td>2</td><td><b>CDM Ingest</b></td><td>Startup + 30 min</td><td>Pull cdm_public batch (Space-Track / demo file) → cache.</td></tr>
+  <tr><td>3</td><td><b>Parser &amp; Validator</b></td><td>On new batch</td><td>Normalise raw rows/KVN into typed CDMs; quarantine invalid records.</td></tr>
+  <tr><td>4</td><td><b>Pc Engine</b></td><td>Per event</td><td>Foster + Chan Pc (or max-Pc), method-divergence check.</td></tr>
+  <tr><td>5</td><td><b>Risk Analyst</b></td><td>Per event</td><td>Classification, urgency, action text, optional AI briefing.</td></tr>
+  <tr><td>6</td><td><b>Publisher</b></td><td>On snapshot</td><td>Persist read-model, expose via REST, notify UI.</td></tr>
+</table>
+
+<h1>3. Data Design (summary)</h1>
+<p>SQLite (file <code>backend/app/data/cache.db</code>) with three tables: <code>kv_cache</code>
+(source payload cache with TTL), <code>events</code> (enriched conjunction read-model, JSON
+document per event), <code>pipeline_runs</code> (agent, started/finished, status, items, error).
+Full DDL in LLD §4. Rationale: zero-dependency local store; the service interface
+(<code>CacheService</code>) is the single seam for the later AWS move (DynamoDB/RDS + S3).</p>
+
+<h1>4. Error Handling &amp; Logging Strategy</h1>
+<ul>
+  <li><b>Exception hierarchy</b> rooted at <code>KesslerError(code, message, http_status)</code>:
+      <code>DataSourceError</code> (502), <code>RateLimitError</code> (503), <code>CdmParseError</code> (422),
+      <code>PropagationError</code> (500), <code>NotFoundError</code> (404), <code>ConfigError</code> (500).</li>
+  <li><b>Boundary rule</b>: logic layer raises; service layer catches, contextualises, decides
+      fallback (cache, demo, skip-record) and re-raises typed errors only when unrecoverable;
+      API layer converts to the JSON error envelope via global handlers. UI never receives a stack trace.</li>
+  <li><b>Logging</b>: <code>logging</code> with console + rotating file handlers; per-request
+      request_id middleware; agent runs logged start/finish with duration and item counts.
+      WARN = degraded (fallback used), ERROR = user-visible failure.</li>
+</ul>
+
+<h1>5. Technology Choices</h1>
+<table>
+  <tr><th>Choice</th><th>Rationale</th></tr>
+  <tr><td>FastAPI + Pydantic v2</td><td>Typed request/response contracts, free OpenAPI docs, async I/O for polite external fetching.</td></tr>
+  <tr><td>python-sgp4</td><td>The community-standard, battle-tested propagator (same core as CelesTrak's).</td></tr>
+  <tr><td>NumPy (+ pure-py quadrature)</td><td>Vectorised screening and Pc integration without heavyweight dependencies.</td></tr>
+  <tr><td>SQLite</td><td>Zero-ops local persistence; interface-isolated for AWS later.</td></tr>
+  <tr><td>React + react-three-fiber + drei</td><td>Declarative Three.js; the 3D scene is a component tree, testable and maintainable.</td></tr>
+  <tr><td>satellite.js (UI)</td><td>Client-side SGP4 for smooth 60 fps orbit animation without hammering the API.</td></tr>
+  <tr><td>Vite</td><td>Fast dev server with <code>/api</code> proxy to backend (no CORS pain in dev).</td></tr>
+</table>
+
+<h1>6. Deployment View</h1>
+<p><b>v1.0 (now):</b> localhost — <code>uvicorn app.main:app --port 8000</code> and
+<code>npm run dev</code> (Vite, :5173, proxying <code>/api</code>). No Vercel deployment.
+<b>v2.0 (later, when AWS is provided):</b> backend container on ECS/Lightsail; EventBridge
+schedules replace in-process scheduler; S3 or RDS replaces SQLite behind <code>CacheService</code>;
+CloudWatch replaces file logs. No logic-layer change anticipated.</p>
+
+<h1>7. Risks &amp; Mitigations</h1>
+<table>
+  <tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr>
+  <tr><td>Space-Track account suspension (rate misuse)</td><td>Loss of live CDMs</td><td>Central throttle + budget guard; cache-first; demo fallback.</td></tr>
+  <tr><td>cdm_public lacks covariance</td><td>No full-fidelity Pc</td><td>Max-Pc path (FR-PC-3) with explicit <code>pc_type</code> labelling; KVN parser ready for operator CDMs.</td></tr>
+  <tr><td>SGP4 accuracy limits (km-level at days)</td><td>Screening false ±</td><td>Present screening as triage, not operational CA; document error budget in UI.</td></tr>
+  <tr><td>WebGL performance on low-end devices</td><td>Choppy demo</td><td>Cap orbit segments, requestAnimationFrame-driven, degrade to 2D list gracefully.</td></tr>
+</table>
+
+<footer>KESSLER · KSL-HLD-001 v1.0 · Traces: KSL-SRS-001. Orbital data courtesy of Space-Track.org and CelesTrak.</footer>
+</body>
+</html>

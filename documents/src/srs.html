@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KESSLER — Software Requirements Specification</title>
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<div class="cover">
+  <div class="project">KESSLER</div>
+  <div class="doctitle">Software Requirements Specification (SRS)</div>
+  <div class="meta">
+    <span><b>Document ID:</b> KSL-SRS-001</span>
+    <span><b>Version:</b> 1.0</span>
+    <span><b>Date:</b> 21 July 2026</span>
+    <span><b>Status:</b> Baselined</span>
+  </div>
+  <div class="meta"><span><b>Product:</b> KESSLER — Open Orbital Conjunction Assessment &amp; Risk Toolkit</span></div>
+</div>
+
+<h1>1. Introduction</h1>
+<h2>1.1 Purpose</h2>
+<p>This SRS defines the functional and non-functional requirements for <b>KESSLER</b>, an open-source
+conjunction assessment toolkit. KESSLER ingests public space-surveillance data (Conjunction Data
+Messages and General Perturbations orbital elements), computes and verifies collision probability
+(Pc), classifies orbital-collision risk, and presents results through a REST API and a 3D
+web dashboard. The document is the contract between the architecture and the implementation and is
+the baseline against which QA validates the release.</p>
+
+<h2>1.2 Scope</h2>
+<p>KESSLER addresses a verified gap in the space-safety ecosystem: the reference conjunction
+assessment tooling (NASA CARA) is MATLAB-based, and no lightweight open Python library exists for
+CDM parsing plus collision-probability computation, while the US TraCSS programme is beginning to
+distribute standardized CDMs to all satellite operators. KESSLER provides:</p>
+<ul>
+  <li>A <b>backend service</b> (Python/FastAPI) with a clean separation of <i>logic</i> (astrodynamics
+      and risk mathematics) and <i>service</i> (orchestration, data access, caching) layers.</li>
+  <li>A <b>3D web dashboard</b> (React + Three.js) visualising conjunction geometry, orbits and risk.</li>
+  <li>A <b>pipeline observability view</b> that renders the agent/data-flow design diagram
+      (n8n-style) live in the product UI.</li>
+</ul>
+<p>Out of scope for v1.0: manoeuvre planning, operator-grade CDMs with full covariance from
+Space-Track operator accounts, multi-tenant auth, and cloud deployment (AWS integration is planned;
+credentials/infrastructure will be provided in a later phase).</p>
+
+<h2>1.3 Definitions and Acronyms</h2>
+<table>
+  <tr><th>Term</th><th>Definition</th></tr>
+  <tr><td class="mono">CDM</td><td>Conjunction Data Message (CCSDS 508.0-B-1) — standardized message describing a predicted close approach between two space objects.</td></tr>
+  <tr><td class="mono">TCA</td><td>Time of Closest Approach.</td></tr>
+  <tr><td class="mono">Pc</td><td>Probability of Collision for a conjunction event.</td></tr>
+  <tr><td class="mono">GP / OMM</td><td>General Perturbations orbital data / Orbit Mean-Elements Message (CCSDS 502.0-B-2).</td></tr>
+  <tr><td class="mono">TLE</td><td>Two-Line Element set — legacy GP data encoding, propagated with SGP4.</td></tr>
+  <tr><td class="mono">SGP4</td><td>Simplified General Perturbations propagator model #4.</td></tr>
+  <tr><td class="mono">RTN</td><td>Radial / Transverse (in-track) / Normal (cross-track) satellite-centred frame.</td></tr>
+  <tr><td class="mono">HBR</td><td>Hard-Body Radius — combined effective radius of the two objects.</td></tr>
+  <tr><td class="mono">Screening</td><td>Bulk search for close approaches between a protected asset and the catalogue.</td></tr>
+  <tr><td class="mono">TraCSS</td><td>US Office of Space Commerce Traffic Coordination System for Space.</td></tr>
+</table>
+
+<h2>1.4 References</h2>
+<ul>
+  <li>CCSDS 508.0-B-1 — Conjunction Data Message Blue Book.</li>
+  <li>TraCSS-Spec-001 v2.1 — CDM Specification for TraCSS (Office of Space Commerce, 2026).</li>
+  <li>Space-Track.org API documentation (cdm_public, gp classes; rate limits).</li>
+  <li>CelesTrak GP data formats (gp.php, OMM JSON).</li>
+  <li>Foster, J. L., Estes, H. S. (1992) — Parametric analysis of orbital debris collision probability.</li>
+  <li>Chan, F. K. (2008) — Spacecraft Collision Probability (analytic series method).</li>
+  <li>NASA CARA Analysis Tools (reference implementation, MATLAB).</li>
+</ul>
+
+<h1>2. Overall Description</h1>
+<h2>2.1 Product Perspective</h2>
+<p>KESSLER is a self-contained web application plus reusable computation core. It consumes public
+external data services and requires no paid dependency. It runs fully on localhost for v1.0; the
+service layer is written so that storage and schedulers can later be re-pointed to AWS
+(S3/RDS/EventBridge) without touching the logic layer.</p>
+
+<h2>2.2 User Classes</h2>
+<table>
+  <tr><th>User class</th><th>Description</th><th>Primary interest</th></tr>
+  <tr><td>Smallsat operator</td><td>Operates 1–20 satellites, no dedicated SSA team.</td><td>“Is anything coming close to my satellite this week, and how worried should I be?”</td></tr>
+  <tr><td>SSA analyst / researcher</td><td>Studies conjunction statistics and Pc methods.</td><td>Reproducible Pc computation, exportable data.</td></tr>
+  <tr><td>Developer</td><td>Integrates conjunction data into other systems.</td><td>Clean REST API, typed schemas, predictable errors.</td></tr>
+  <tr><td>Demo viewer</td><td>Evaluates the project (recruiter, community).</td><td>3D visualisation, pipeline diagram, polish.</td></tr>
+</table>
+
+<h2>2.3 Operating Environment</h2>
+<ul>
+  <li>Backend: Python ≥ 3.11, FastAPI/uvicorn, Windows/Linux/macOS.</li>
+  <li>Frontend: Node ≥ 18, Vite build, evergreen browsers with WebGL 2.</li>
+  <li>v1.0 target: localhost (backend :8000, UI dev server :5173 with API proxy).</li>
+</ul>
+
+<h2>2.4 Design Constraints</h2>
+<table>
+  <tr><th>ID</th><th>Constraint</th></tr>
+  <tr><td class="req-id">CON-1</td><td>Space-Track rate limits (&lt;30 req/min, &lt;300 req/hr; GP at most hourly) MUST be respected; architecture MUST be cache-first. Live per-user pass-through queries are forbidden.</td></tr>
+  <tr><td class="req-id">CON-2</td><td>Redistribution: only basic SSA data (TLE/OMM, SATCAT, decay) may be re-served, and always with Space-Track citation. CDM-derived screens carry source attribution.</td></tr>
+  <tr><td class="req-id">CON-3</td><td>The system MUST be fully functional with zero credentials (Demo Mode) using bundled sample data, because Space-Track accounts and AWS are provisioned later.</td></tr>
+  <tr><td class="req-id">CON-4</td><td>No paid services in v1.0. Optional AI features degrade gracefully when no API key is configured.</td></tr>
+  <tr><td class="req-id">CON-5</td><td>Repository layout: separate <code>ui/</code> and <code>backend/</code> top-level folders; backend separates <code>logic/</code> and <code>service/</code> packages.</td></tr>
+</table>
+
+<h1>3. Functional Requirements</h1>
+
+<h2>3.1 Data Ingestion (FR-ING)</h2>
+<table>
+  <tr><th>ID</th><th>Requirement</th><th>Priority</th></tr>
+  <tr><td class="req-id">FR-ING-1</td><td>The system SHALL ingest GP/OMM orbital elements from CelesTrak (<code>gp.php</code>, JSON OMM format) without authentication.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-ING-2</td><td>The system SHALL ingest public conjunction data from the Space-Track <code>cdm_public</code> class when credentials are configured (fields incl. CDM_ID, CREATED, TCA, MIN_RNG, PC, SAT_1_ID, SAT_1_NAME, SAT_2_ID, SAT_2_NAME, EMERGENCY_REPORTABLE).</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-ING-3</td><td>All external fetches SHALL be cached in a local store with per-source TTL (GP ≥ 1 h, CDM ≥ 30 min) and served from cache within TTL.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-ING-4</td><td>In Demo Mode (no credentials) the system SHALL load bundled sample GP and CDM datasets and mark responses <code>data_mode: "demo"</code>.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-ING-5</td><td>Ingestion failures SHALL degrade to last-known-good cache with a structured warning, never a hard UI failure.</td><td>Must</td></tr>
+</table>
+
+<h2>3.2 CDM Parsing (FR-CDM)</h2>
+<table>
+  <tr><th>ID</th><th>Requirement</th><th>Priority</th></tr>
+  <tr><td class="req-id">FR-CDM-1</td><td>The system SHALL parse CCSDS CDM messages in KVN format into a typed model (header, relative metadata, per-object metadata/OD/state/covariance sections).</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-CDM-2</td><td>The system SHALL parse Space-Track <code>cdm_public</code> JSON rows into the same internal model.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-CDM-3</td><td>The parser SHALL validate mandatory fields (TCA, both object designators) and units, raising a typed <code>CdmParseError</code> listing all violations.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-CDM-4</td><td>When RTN covariance and relative state are present the parser SHALL expose them for Pc computation; when absent it SHALL flag the event <code>covariance_available: false</code>.</td><td>Must</td></tr>
+</table>
+
+<h2>3.3 Collision Probability (FR-PC)</h2>
+<table>
+  <tr><th>ID</th><th>Requirement</th><th>Priority</th></tr>
+  <tr><td class="req-id">FR-PC-1</td><td>The system SHALL compute 2D Pc by the Foster method: project combined position covariance onto the encounter plane (perpendicular to relative velocity) and numerically integrate the bivariate Gaussian over the HBR disc.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-PC-2</td><td>The system SHALL additionally compute Chan's analytic-series Pc as an independent cross-check; results SHALL agree within 5% for well-conditioned covariances, else the event is flagged <code>pc_method_divergence</code>.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-PC-3</td><td>When covariance is unavailable the system SHALL compute a conservative <b>maximum Pc</b> (worst-case covariance orientation/scale, Alfano-style) and label the value <code>pc_type: "max"</code>.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-PC-4</td><td>Default HBR SHALL be 20 m combined, overridable per request; object-type heuristics (payload/rocket body/debris) MAY refine the default.</td><td>Should</td></tr>
+  <tr><td class="req-id">FR-PC-5</td><td>All Pc computations SHALL be pure functions in the logic layer (no I/O) and unit-tested against reference cases, including the closed-form isotropic-covariance solution.</td><td>Must</td></tr>
+</table>
+
+<h2>3.4 Screening (FR-SCR)</h2>
+<table>
+  <tr><th>ID</th><th>Requirement</th><th>Priority</th></tr>
+  <tr><td class="req-id">FR-SCR-1</td><td>Given a protected asset (NORAD ID) and a screening window (≤ 72 h), the system SHALL find close approaches against the loaded catalogue subset using SGP4 propagation.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-SCR-2</td><td>Screening SHALL apply a perigee/apogee altitude-band pre-filter (± screening threshold) before propagation to bound cost.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-SCR-3</td><td>Coarse sampling (≤ 60 s step) SHALL be refined to TCA by bounded scalar minimisation; reported TCA accuracy ≤ 1 s.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-SCR-4</td><td>Screening results SHALL include TCA, miss distance (total and RTN components), relative speed, and max-Pc estimate.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-SCR-5</td><td>A screening run over 500 catalogue objects × 24 h SHALL complete in ≤ 30 s on a mid-range laptop.</td><td>Should</td></tr>
+</table>
+
+<h2>3.5 Risk Assessment (FR-RSK)</h2>
+<table>
+  <tr><th>ID</th><th>Requirement</th><th>Priority</th></tr>
+  <tr><td class="req-id">FR-RSK-1</td><td>Events SHALL be classified using operator-community thresholds: <b>CRITICAL</b> Pc ≥ 1e-4; <b>WARNING</b> 1e-5 ≤ Pc &lt; 1e-4; <b>MONITOR</b> 1e-7 ≤ Pc &lt; 1e-5; <b>NEGLIGIBLE</b> Pc &lt; 1e-7. Miss distance &lt; 1 km at TCA raises the class one level if covariance is unavailable.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-RSK-2</td><td>Each event SHALL receive an urgency score combining risk class, time-to-TCA and data age, defining dashboard sort order.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-RSK-3</td><td>Each assessment SHALL include a deterministic recommended action string (e.g. “Request operator CDM refresh; re-screen at T-12 h”).</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-RSK-4</td><td>(Optional) When an Anthropic API key is configured, the system SHALL generate an AI analyst briefing per event; without a key it SHALL fall back to the deterministic template. Failures fall back silently with a logged warning.</td><td>Could</td></tr>
+</table>
+
+<h2>3.6 API (FR-API)</h2>
+<table>
+  <tr><th>ID</th><th>Requirement</th><th>Priority</th></tr>
+  <tr><td class="req-id">FR-API-1</td><td>REST API under <code>/api/v1</code>: list conjunctions (sorted by urgency), event detail, satellite ground/orbit track, run screening, pipeline status, health.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-API-2</td><td>All error responses SHALL use a single envelope: <code>{"error": {"code", "message", "detail", "request_id"}}</code> with correct HTTP status (400/404/422/502/503/500).</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-API-3</td><td>OpenAPI schema SHALL be served at <code>/docs</code> (FastAPI native).</td><td>Must</td></tr>
+</table>
+
+<h2>3.7 Visualisation (FR-UI)</h2>
+<table>
+  <tr><th>ID</th><th>Requirement</th><th>Priority</th></tr>
+  <tr><td class="req-id">FR-UI-1</td><td>The dashboard SHALL render an interactive 3D Earth (WebGL/Three.js) with the protected asset's orbit, secondary-object orbits for selected events, and conjunction markers at TCA geometry.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-UI-2</td><td>An event list SHALL show risk class, Pc, miss distance, relative speed and countdown-to-TCA, sorted by urgency; selecting an event focuses the 3D view and opens the detail panel.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-UI-3</td><td>A <b>Pipeline</b> page SHALL embed the n8n-style agent/data-flow diagram (the same artefact delivered in <code>documents/diagrams/</code>) with live stage status from <code>/api/v1/pipeline/status</code>.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-UI-4</td><td>Visual design: dark space-grade theme, purposeful; no decorative pattern noise. All numbers displayed with units and reference frame.</td><td>Must</td></tr>
+  <tr><td class="req-id">FR-UI-5</td><td>API failures SHALL surface as non-blocking toasts with retry; the 3D scene keeps last-good data.</td><td>Must</td></tr>
+</table>
+
+<h1>4. Non-Functional Requirements</h1>
+<table>
+  <tr><th>ID</th><th>Category</th><th>Requirement</th></tr>
+  <tr><td class="req-id">NFR-1</td><td>Reliability</td><td>Every service-layer entry point wraps external I/O in typed exception handling; no unhandled exception may cross the API boundary (global handler guarantees the error envelope).</td></tr>
+  <tr><td class="req-id">NFR-2</td><td>Observability</td><td>Structured logging (timestamp, level, logger, request_id, message) to console and rotating file <code>backend/logs/kessler.log</code> (5 MB × 3). Each request gets a request_id propagated into responses.</td></tr>
+  <tr><td class="req-id">NFR-3</td><td>Performance</td><td>Cached list endpoints p95 &lt; 200 ms; single-event Pc computation &lt; 50 ms; UI first meaningful paint &lt; 3 s on localhost.</td></tr>
+  <tr><td class="req-id">NFR-4</td><td>Security</td><td>Credentials only via environment variables (never committed); CORS restricted to localhost dev origins in v1.0; no PII stored.</td></tr>
+  <tr><td class="req-id">NFR-5</td><td>Portability</td><td>No OS-specific paths; SQLite file store abstracted behind a cache interface so AWS (S3/RDS) can replace it without logic-layer changes.</td></tr>
+  <tr><td class="req-id">NFR-6</td><td>Maintainability</td><td>Logic layer is framework-free pure Python; ≥ 85% unit-test coverage on <code>logic/</code>; type hints throughout; UI strict TypeScript.</td></tr>
+  <tr><td class="req-id">NFR-7</td><td>Compliance</td><td>Space-Track citation rendered in UI footer and API root; CelesTrak attribution on data views.</td></tr>
+</table>
+
+<h1>5. Acceptance Criteria</h1>
+<ul>
+  <li>All Must requirements demonstrably implemented; QA report (KSL-QA-001) shows tests passing.</li>
+  <li><code>uvicorn app.main:app</code> + <code>npm run dev</code> yields a working dashboard on localhost with Demo Mode data and no console errors.</li>
+  <li>Unit tests green: Pc reference cases, CDM parser fixtures, screening on synthetic two-body setup, API contract tests.</li>
+  <li>Documents delivered: SRS, HLD, LLD (PDF) + interactive pipeline diagram (HTML) + QA report.</li>
+</ul>
+
+<footer>KESSLER · KSL-SRS-001 v1.0 · Orbital data courtesy of Space-Track.org (USSPACECOM) and CelesTrak. This document contains no export-controlled technical data.</footer>
+</body>
+</html>
