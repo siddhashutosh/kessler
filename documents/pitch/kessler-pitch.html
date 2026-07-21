@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>KESSLER — Pitch</title>
+<style>
+  :root {
+    --void: #060910;
+    --panel: #0d1424;
+    --panel-edge: #1d2942;
+    --ink: #e2ebfb;
+    --dim: #8296b5;
+    --faint: #4a5b78;
+    --cyan: #5cd6ff;
+    --cyan-deep: rgba(92, 214, 255, 0.13);
+    --amber: #ffb454;
+    --red: #ff5d5d;
+    --green: #3ddc84;
+    --display: "Bahnschrift", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --body: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", "Consolas", "SF Mono", monospace;
+  }
+  /* Deliberately single-theme: the deck lives in the product's own
+     mission-control environment. */
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--void);
+    color: var(--ink);
+    font-family: var(--body);
+    margin: 0;
+    overflow-x: hidden;
+  }
+  ::selection { background: var(--cyan); color: var(--void); }
+
+  /* ------------------------------------------------ telemetry rail */
+  .rail {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 178px;
+    border-right: 1px solid var(--panel-edge);
+    display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    padding: 0 0 0 22px; z-index: 50;
+    background: linear-gradient(90deg, rgba(6,9,16,0.92), rgba(6,9,16,0.6));
+    backdrop-filter: blur(4px);
+  }
+  .rail a {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 1.6px;
+    color: var(--faint); text-decoration: none; padding: 6px 0;
+    text-transform: uppercase; transition: color .2s;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  .rail a .t { color: var(--faint); }
+  .rail a:hover, .rail a.live { color: var(--cyan); }
+  .rail a.live .t { color: var(--cyan); }
+  .rail .sig {
+    margin-top: 34px; font-family: var(--mono); font-size: 9px;
+    color: var(--faint); letter-spacing: 1.6px; line-height: 1.9;
+  }
+  @media (max-width: 900px) { .rail { display: none; } }
+
+  /* ------------------------------------------------------- slides */
+  .slide {
+    min-height: 100vh;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 84px 8vw 84px calc(178px + 6vw);
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--panel-edge);
+    position: relative;
+  }
+  @media (max-width: 900px) { .slide { padding: 64px 6vw; } }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 4px;
+    text-transform: uppercase; color: var(--cyan); margin: 0 0 22px;
+  }
+  .eyebrow .idx { color: var(--faint); margin-right: 12px; }
+  h1, h2 {
+    font-family: var(--display); font-weight: 600; text-wrap: balance;
+    margin: 0 0 18px; line-height: 1.06; letter-spacing: -0.5px;
+  }
+  h1 { font-size: clamp(44px, 7vw, 92px); }
+  h2 { font-size: clamp(30px, 4.4vw, 54px); max-width: 17ch; }
+  .lede {
+    font-size: clamp(16px, 1.6vw, 20px); color: var(--dim);
+    max-width: 58ch; line-height: 1.65; margin: 0 0 34px;
+  }
+  .lede b, .lede strong { color: var(--ink); font-weight: 600; }
+  .accent { color: var(--cyan); }
+
+  /* ------------------------------------------------------- hero */
+  #t0 { overflow: hidden; }
+  #orbits {
+    position: absolute; inset: 0; z-index: 0; opacity: 0.9;
+  }
+  #t0 .content { position: relative; z-index: 1; }
+  .wordmark {
+    font-family: var(--display);
+    font-size: clamp(58px, 10vw, 138px);
+    letter-spacing: clamp(6px, 1.6vw, 22px);
+    font-weight: 700; margin: 0;
+    text-shadow: 0 0 60px rgba(92, 214, 255, 0.25);
+  }
+  .wordmark .dot { color: var(--cyan); }
+  .subtitle {
+    font-family: var(--mono); font-size: clamp(11px, 1.2vw, 14px);
+    letter-spacing: 3.5px; text-transform: uppercase; color: var(--dim);
+    margin: 18px 0 46px;
+  }
+  .ticker {
+    display: flex; flex-wrap: wrap; gap: 14px;
+  }
+  .tick {
+    border: 1px solid var(--panel-edge); background: rgba(13, 20, 36, 0.72);
+    padding: 14px 20px; min-width: 150px; backdrop-filter: blur(3px);
+  }
+  .tick .n {
+    font-family: var(--mono); font-size: clamp(20px, 2.4vw, 30px);
+    font-variant-numeric: tabular-nums; color: var(--ink);
+  }
+  .tick .n em { font-style: normal; color: var(--cyan); }
+  .tick .l {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--faint); margin-top: 7px;
+  }
+
+  /* ------------------------------------------------------ stat grid */
+  .grid { display: grid; gap: 16px; }
+  .grid.c3 { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--panel-edge);
+    padding: 22px 24px;
+  }
+  .card .big {
+    font-family: var(--display); font-size: clamp(30px, 3.6vw, 48px);
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .card .big.red { color: var(--red); }
+  .card .big.amber { color: var(--amber); }
+  .card .big.cyan { color: var(--cyan); }
+  .card p { color: var(--dim); font-size: 13.5px; line-height: 1.6; margin: 12px 0 0; }
+  .card p b { color: var(--ink); }
+
+  /* --------------------------------------------------- pipeline strip */
+  .pipe { display: flex; flex-wrap: wrap; gap: 0; align-items: stretch; margin: 8px 0 26px; }
+  .pnode {
+    background: var(--panel); border: 1px solid var(--panel-edge);
+    padding: 13px 16px; min-width: 118px; position: relative;
+  }
+  .pnode + .pnode { margin-left: 26px; }
+  .pnode + .pnode::before {
+    content: ""; position: absolute; left: -27px; top: 50%; width: 26px; height: 1px;
+    background: repeating-linear-gradient(90deg, var(--cyan) 0 5px, transparent 5px 9px);
+    opacity: 0.65;
+  }
+  .pnode .k {
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 1.8px;
+    color: var(--faint); text-transform: uppercase;
+  }
+  .pnode .v { font-family: var(--display); font-size: 14.5px; margin-top: 4px; }
+  .pnode .s { font-family: var(--mono); font-size: 9.5px; color: var(--green); margin-top: 6px; }
+
+  /* --------------------------------------------------- demo mock */
+  .mock {
+    border: 1px solid var(--panel-edge); background: var(--panel);
+    font-family: var(--mono); font-size: 12px;
+  }
+  .mock .bar {
+    display: flex; gap: 14px; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid var(--panel-edge);
+    color: var(--faint); font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  }
+  .mock .bar .pill {
+    border: 1px solid rgba(61, 220, 132, 0.5); color: var(--green);
+    padding: 1px 9px; border-radius: 999px; font-size: 9px;
+  }
+  .erow {
+    display: grid; grid-template-columns: 5px 1fr auto auto auto;
+    gap: 16px; align-items: center; padding: 11px 16px;
+    border-bottom: 1px solid rgba(29, 41, 66, 0.6);
+    font-variant-numeric: tabular-nums;
+  }
+  .erow .b { width: 4px; height: 26px; }
+  .erow .pair { color: var(--ink); }
+  .erow .pair span { color: var(--faint); padding: 0 6px; }
+  .erow .num { color: var(--dim); }
+  .badge {
+    font-size: 9px; letter-spacing: 1.5px; padding: 2px 8px;
+  }
+  .crit { color: var(--red); background: rgba(255, 93, 93, 0.12); }
+  .warnb { color: var(--amber); background: rgba(255, 180, 84, 0.12); }
+  .monb { color: var(--cyan); background: rgba(92, 214, 255, 0.1); }
+  .b.crit { background: var(--red); }
+  .b.warnb { background: var(--amber); }
+  .b.monb { background: var(--cyan); }
+
+  .code {
+    background: #0a0f1c; border: 1px solid var(--panel-edge);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+    padding: 18px 20px; overflow-x: auto; color: var(--dim); margin: 0;
+  }
+  .code .k { color: var(--cyan); }
+  .code .s { color: var(--amber); }
+  .code .n { color: var(--ink); }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+  @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
+  .cap {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--faint); margin: 0 0 10px;
+  }
+
+  /* --------------------------------------------------- receipts list */
+  .receipts { display: flex; flex-direction: column; gap: 0; margin-top: 6px; }
+  .receipt {
+    display: grid; grid-template-columns: 190px 1fr; gap: 24px;
+    padding: 16px 0; border-bottom: 1px solid var(--panel-edge);
+  }
+  .receipt .metric {
+    font-family: var(--mono); font-size: 15px; color: var(--cyan);
+    font-variant-numeric: tabular-nums;
+  }
+  .receipt .what { color: var(--dim); font-size: 14px; line-height: 1.6; }
+  .receipt .what b { color: var(--ink); }
+  @media (max-width: 700px) { .receipt { grid-template-columns: 1fr; gap: 6px; } }
+
+  /* --------------------------------------------------- roadmap */
+  .phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .phase { border: 1px solid var(--panel-edge); background: var(--panel); padding: 22px; }
+  .phase .tag {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 2.5px;
+    text-transform: uppercase;
+  }
+  .phase .tag.done { color: var(--green); }
+  .phase .tag.next { color: var(--amber); }
+  .phase .tag.later { color: var(--faint); }
+  .phase h3 { font-family: var(--display); font-size: 19px; margin: 10px 0 8px; }
+  .phase p { color: var(--dim); font-size: 13px; line-height: 1.6; margin: 0; }
+
+  /* --------------------------------------------------- CTA */
+  .cta-line {
+    font-family: var(--display); font-size: clamp(24px, 3.2vw, 40px);
+    line-height: 1.25; max-width: 24ch; text-wrap: balance;
+  }
+  .keys {
+    position: fixed; right: 22px; bottom: 18px; z-index: 50;
+    font-family: var(--mono); font-size: 9.5px; color: var(--faint);
+    letter-spacing: 1.5px;
+  }
+  footer.colophon {
+    padding: 26px 8vw 26px calc(178px + 6vw);
+    font-family: var(--mono); font-size: 10px; color: var(--faint);
+    letter-spacing: 0.8px; line-height: 1.8;
+  }
+  @media (max-width: 900px) { footer.colophon { padding: 26px 6vw; } }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+</style>
+
+<nav class="rail" aria-label="Slides">
+  <a href="#t0"><span class="t">T-00</span> Kessler</a>
+  <a href="#t1"><span class="t">T-01</span> Problem</a>
+  <a href="#t2"><span class="t">T-02</span> System</a>
+  <a href="#t3"><span class="t">T-03</span> Demo</a>
+  <a href="#t4"><span class="t">T-04</span> Why now</a>
+  <a href="#t5"><span class="t">T-05</span> Receipts</a>
+  <a href="#t6"><span class="t">T-06</span> Roadmap</a>
+  <a href="#t7"><span class="t">T-07</span> Ask</a>
+  <div class="sig">CONJUNCTION<br>ASSESSMENT<br>TOOLKIT · v1.0<br><br>AP-SOUTH-1<br>LIVE</div>
+</nav>
+<div class="keys">↑ ↓ NAVIGATE</div>
+
+<!-- ============================================================ T-00 -->
+<section class="slide" id="t0">
+  <canvas id="orbits" aria-hidden="true"></canvas>
+  <div class="content">
+    <p class="eyebrow"><span class="idx">T-00</span>Open orbital conjunction assessment</p>
+    <h1 class="wordmark">KESSLER<span class="dot">_</span></h1>
+    <p class="subtitle">Know what's about to hit your satellite — before it matters</p>
+    <div class="ticker">
+      <div class="tick"><div class="n">47,000<em>+</em></div><div class="l">objects tracked in orbit</div></div>
+      <div class="tick"><div class="n" id="cdm-count">200</div><div class="l">live CDMs ingested / cycle</div></div>
+      <div class="tick"><div class="n"><em>2.2e-4</em></div><div class="l">top live Pc, day one</div></div>
+      <div class="tick"><div class="n">₹0<em>/mo</em></div><div class="l">marginal infra cost</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ T-01 -->
+<section class="slide" id="t1">
+  <p class="eyebrow"><span class="idx">T-01</span>The problem</p>
+  <h2>Orbit is filling up faster than the tools that keep it safe.</h2>
+  <p class="lede">
+    Mega-constellations have compressed collision-avoidance decisions
+    <b>from days to hours</b>. Every operator now receives Conjunction Data
+    Messages — but the tooling to read them is <b>MATLAB-locked, commercial,
+    or doesn't exist.</b>
+  </p>
+  <div class="grid c3">
+    <div class="card">
+      <div class="big red">$1.7B</div>
+      <p>spent by the US DoD between 2000–2022 trying to replace its
+      space-tracking software. <b>It still shipped nothing.</b></p>
+    </div>
+    <div class="card">
+      <div class="big amber">2×</div>
+      <p>every conjunction arrives as <b>duplicate, contradictory rows</b> —
+      one per object's perspective, plus a new row per screening update.
+      Operators de-duplicate by hand.</p>
+    </div>
+    <div class="card">
+      <div class="big cyan">0</div>
+      <p>lightweight open-source Python libraries for CDM parsing +
+      collision-probability computation. NASA's reference tooling (CARA)
+      is <b>MATLAB-only</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ T-02 -->
+<section class="slide" id="t2">
+  <p class="eyebrow"><span class="idx">T-02</span>The system</p>
+  <h2>Six agents. Raw surveillance data in, a decision out.</h2>
+  <p class="lede">
+    KESSLER is an autonomous pipeline: it pulls public orbital data, collapses
+    the duplicates, <b>computes collision probability two independent ways</b>,
+    and ranks every event by how urgently a human should care.
+  </p>
+  <div class="pipe">
+    <div class="pnode"><div class="k">Agent 01</div><div class="v">Catalog Sync</div><div class="s">● CelesTrak GP</div></div>
+    <div class="pnode"><div class="k">Agent 02</div><div class="v">CDM Ingest</div><div class="s">● Space-Track</div></div>
+    <div class="pnode"><div class="k">Agent 03</div><div class="v">Parser</div><div class="s">● dedupe + validate</div></div>
+    <div class="pnode"><div class="k">Agent 04</div><div class="v">Pc Engine</div><div class="s">● Foster × Chan</div></div>
+    <div class="pnode"><div class="k">Agent 05</div><div class="v">Risk Analyst</div><div class="s">● triage + action</div></div>
+    <div class="pnode"><div class="k">Agent 06</div><div class="v">Publisher</div><div class="s">● API + 3D UI</div></div>
+  </div>
+  <div class="grid c3">
+    <div class="card"><div class="big cyan">2</div>
+      <p><b>Independent Pc methods</b> — Foster 2-D numerical integration,
+      cross-checked against Chan's analytic series. Disagreement &gt; 5% flags
+      the event rather than hiding it.</p></div>
+    <div class="card"><div class="big cyan">3</div>
+      <p><b>Honesty levels for every number.</b> Full-covariance computation,
+      source-reported value, or a labelled conservative upper bound — the UI
+      always says which one you're looking at.</p></div>
+    <div class="card"><div class="big cyan">&lt;20</div>
+      <p><b>Requests per minute, enforced in code.</b> A rate-limit governor
+      keeps Space-Track happy and your account safe — cache-first by
+      architecture, not by discipline.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ T-03 -->
+<section class="slide" id="t3">
+  <p class="eyebrow"><span class="idx">T-03</span>The demo · live data, not a slide</p>
+  <h2>This is real. It's running right now.</h2>
+  <p class="lede">
+    What follows in the live demo is powered by <b>today's actual Space-Track
+    feed</b> — the same debris conjunction the 18th Space Defense Squadron is
+    watching, triaged by KESSLER in real time.
+  </p>
+  <div class="split">
+    <div>
+      <p class="cap">Dashboard · urgency-ranked events</p>
+      <div class="mock">
+        <div class="bar">KESSLER · CONJUNCTIONS <span class="pill">LIVE DATA</span></div>
+        <div class="erow"><div class="b crit"></div><div class="pair">SL-16 DEB<span>×</span>COSMOS 1375 DEB</div><div class="num">Pc 2.2e-4</div><div class="num">85.0 km</div><div class="badge crit">CRITICAL</div></div>
+        <div class="erow"><div class="b warnb"></div><div class="pair">FENGYUN 1C DEB<span>×</span>CZ-4 DEB</div><div class="num">Pc 4.1e-5</div><div class="num">0.94 km</div><div class="badge warnb">WARNING</div></div>
+        <div class="erow"><div class="b monb"></div><div class="pair">STARLINK-31002<span>×</span>SL-8 R/B</div><div class="num">Pc 8.7e-7</div><div class="num">1.41 km</div><div class="badge monb">MONITOR</div></div>
+      </div>
+      <p class="cap" style="margin-top:22px">3-D orbit view · both objects, closest-approach marker, TEME frame</p>
+      <p class="cap" style="margin-top:4px; color: var(--dim)">+ the agent pipeline lights up live on the /pipeline page — the architecture diagram is the monitoring UI.</p>
+    </div>
+    <div>
+      <p class="cap">One API call · typed, attributed, honest</p>
+      <pre class="code">GET /api/v1/conjunctions
+
+{
+  <span class="k">"data_mode"</span>: <span class="s">"live"</span>,
+  <span class="k">"events"</span>: [{
+    <span class="k">"sat1"</span>: { <span class="k">"name"</span>: <span class="s">"SL-16 DEB"</span> },
+    <span class="k">"sat2"</span>: { <span class="k">"name"</span>: <span class="s">"COSMOS 1375 DEB"</span> },
+    <span class="k">"pc"</span>: {
+      <span class="k">"value"</span>: <span class="n">2.19e-4</span>,
+      <span class="k">"method"</span>: <span class="s">"source-reported"</span>,
+      <span class="k">"pc_type"</span>: <span class="s">"reported"</span>
+    },
+    <span class="k">"risk"</span>: <span class="s">"CRITICAL"</span>,
+    <span class="k">"urgency"</span>: <span class="n">72.5</span>,
+    <span class="k">"action"</span>: <span class="s">"Request refreshed operator
+               CDM with covariance…"</span>
+  }]
+}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ T-04 -->
+<section class="slide" id="t4">
+  <p class="eyebrow"><span class="idx">T-04</span>Why now</p>
+  <h2>A wave of new CDM consumers is arriving. The shelf is empty.</h2>
+  <div class="receipts">
+    <div class="receipt">
+      <div class="metric">2026</div>
+      <div class="what"><b>TraCSS goes operational.</b> The US Office of Space
+      Commerce is now distributing standardized CDMs to every satellite
+      operator — thousands of teams that have never parsed one before.</div>
+    </div>
+    <div class="receipt">
+      <div class="metric">Oct 2023</div>
+      <div class="what"><b>poliastro archived.</b> The most popular open-source
+      Python astrodynamics library went unmaintained; its successor fork has
+      42 GitHub stars. The ecosystem has a vacuum.</div>
+    </div>
+    <div class="receipt">
+      <div class="metric">MATLAB</div>
+      <div class="what"><b>The reference implementation is inaccessible.</b>
+      NASA CARA's conjunction tools require a commercial license to run —
+      a non-starter for smallsat teams and students.</div>
+    </div>
+    <div class="receipt">
+      <div class="metric">253+</div>
+      <div class="what"><b>Indian NewSpace startups</b> concentrate upstream
+      (launch, hardware) while downstream tooling — 70% of global commercial
+      space activity — stays underserved. KESSLER is built from India, on the
+      infrastructure Indian operators already use.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ T-05 -->
+<section class="slide" id="t5">
+  <p class="eyebrow"><span class="idx">T-05</span>Engineering receipts</p>
+  <h2>Spec'd, built, verified, and deployed. Not a prototype.</h2>
+  <div class="receipts">
+    <div class="receipt"><div class="metric">49 / 49</div>
+      <div class="what">tests passing — the Pc engine is validated against the
+      <b>closed-form isotropic solution to &lt; 0.1% error</b>, and Foster/Chan
+      cross-agreement is enforced on every reference geometry.</div></div>
+    <div class="receipt"><div class="metric">SRS · HLD · LLD · QA</div>
+      <div class="what">full document set shipped as PDFs — requirements traced
+      to tests, architecture traced to code, QA signed off with findings and
+      dispositions. <b>Aerospace-style rigor, open-source speed.</b></div></div>
+    <div class="receipt"><div class="metric">66 MB</div>
+      <div class="what">production memory footprint. The entire system —
+      ingestion, math, API, 3-D dashboard — runs on a <b>$5-class VPS</b>
+      alongside other workloads. Live right now in ap-south-1.</div></div>
+    <div class="receipt"><div class="metric">1 day</div>
+      <div class="what">from requirements baseline to a live deployment
+      triaging real debris conjunctions — because the architecture separates
+      pure math from orchestration, and both from presentation.</div></div>
+  </div>
+</section>
+
+<!-- ============================================================ T-06 -->
+<section class="slide" id="t6">
+  <p class="eyebrow"><span class="idx">T-06</span>Roadmap</p>
+  <h2>From conjunction triage to the open orbital-risk stack.</h2>
+  <div class="phases">
+    <div class="phase">
+      <div class="tag done">● Shipped · v1.0</div>
+      <h3>Conjunction triage</h3>
+      <p>Live CDM ingestion, dual-method Pc, risk ranking, screening engine,
+      3-D dashboard, REST API. Deployed and running.</p>
+    </div>
+    <div class="phase">
+      <div class="tag next">● Next</div>
+      <h3>Operator-grade fidelity</h3>
+      <p>Full-covariance KVN CDMs (parser already supports them), historical
+      conjunction analytics, alerting hooks. AWS-native scale-out behind an
+      existing one-class seam.</p>
+    </div>
+    <div class="phase">
+      <div class="tag later">● Then</div>
+      <h3>Space-weather forecasting</h3>
+      <p>Probabilistic F10.7/Kp driver forecasts — the verified missing input to
+      every drag model. Peer-reviewed gap, free NOAA data, same pipeline
+      pattern. Conjunctions + drag = the open orbital-risk stack.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ T-07 -->
+<section class="slide" id="t7">
+  <p class="eyebrow"><span class="idx">T-07</span>The ask</p>
+  <p class="cta-line">
+    Space traffic tooling shouldn't require a <span class="accent">MATLAB
+    license</span> or a defense budget.<br><br>
+    KESSLER is open, verified, and already watching the sky.
+    <span class="accent">Come use it — or come build it.</span>
+  </p>
+  <p class="lede" style="margin-top:30px">
+    <b>For operators &amp; researchers:</b> pilot the toolkit on your assets — screening,
+    triage, and API access on your own infrastructure.<br>
+    <b>For contributors:</b> the repository ships with full SRS/HLD/LLD documentation,
+    a 49-test suite, and a deliberately hackable logic/service split.<br>
+    <b>Contact:</b> github.com/siddhashutosh · siddhvasudev1402@gmail.com
+  </p>
+</section>
+
+<footer class="colophon">
+  KESSLER v1.0 · Orbital data courtesy of Space-Track.org (USSPACECOM) and CelesTrak ·
+  Screening results are triage-grade (SGP4/GP accuracy limits apply) ·
+  Named for the Kessler Syndrome — the cascade this class of tooling exists to prevent.
+</footer>
+
+<script>
+  // ------------------------------------------------ hero orbital canvas
+  (function () {
+    const canvas = document.getElementById("orbits");
+    const ctx = canvas.getContext("2d");
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let w, h, cx, cy, raf;
+
+    function resize() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      w = canvas.clientWidth = canvas.parentElement.clientWidth;
+      h = canvas.clientHeight = canvas.parentElement.clientHeight;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cx = w * 0.68; cy = h * 0.46;
+    }
+
+    const A = { rx: 0.34, ry: 0.13, tilt: -0.42, speed: 0.00022, phase: 0.4, color: "#5cd6ff" };
+    const B = { rx: 0.30, ry: 0.17, tilt: 0.55, speed: -0.00028, phase: 2.2, color: "#ffb454" };
+
+    function pos(o, t) {
+      const a = o.phase + t * o.speed;
+      const x = Math.cos(a) * o.rx * w, y = Math.sin(a) * o.ry * w;
+      return [
+        cx + x * Math.cos(o.tilt) - y * Math.sin(o.tilt),
+        cy + x * Math.sin(o.tilt) + y * Math.cos(o.tilt),
+      ];
+    }
+
+    function ellipse(o) {
+      ctx.beginPath();
+      for (let i = 0; i <= 120; i++) {
+        const a = (i / 120) * Math.PI * 2;
+        const x = Math.cos(a) * o.rx * w, y = Math.sin(a) * o.ry * w;
+        const px = cx + x * Math.cos(o.tilt) - y * Math.sin(o.tilt);
+        const py = cy + x * Math.sin(o.tilt) + y * Math.cos(o.tilt);
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.strokeStyle = o.color; ctx.globalAlpha = 0.28; ctx.lineWidth = 1;
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+
+    function dot(x, y, r, color, glow) {
+      if (glow) {
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r * 6);
+        g.addColorStop(0, color); g.addColorStop(1, "transparent");
+        ctx.globalAlpha = 0.35; ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(x, y, r * 6, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    function frame(t) {
+      ctx.clearRect(0, 0, w, h);
+      // earth
+      const eg = ctx.createRadialGradient(cx - 14, cy - 14, 4, cx, cy, 46);
+      eg.addColorStop(0, "#17324f"); eg.addColorStop(1, "#0a1626");
+      ctx.fillStyle = eg;
+      ctx.beginPath(); ctx.arc(cx, cy, 44, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(92,214,255,0.25)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, 48, 0, Math.PI * 2); ctx.stroke();
+
+      ellipse(A); ellipse(B);
+      const [ax, ay] = pos(A, t), [bx, by] = pos(B, t);
+      dot(ax, ay, 3.2, A.color, true);
+      dot(bx, by, 3.2, B.color, true);
+
+      const d = Math.hypot(ax - bx, ay - by);
+      if (d < 90) {
+        ctx.strokeStyle = "#ff5d5d";
+        ctx.globalAlpha = 1 - d / 90;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+        ctx.setLineDash([]);
+        const mx = (ax + bx) / 2, my = (ay + by) / 2;
+        const pulse = 6 + 4 * Math.sin(t * 0.008);
+        ctx.beginPath(); ctx.arc(mx, my, pulse, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#ff5d5d";
+        ctx.font = "10px Consolas, monospace";
+        ctx.fillText("CLOSE APPROACH", mx + 14, my - 8);
+      }
+      if (!reduced) raf = requestAnimationFrame(frame);
+    }
+
+    resize();
+    addEventListener("resize", () => { cancelAnimationFrame(raf); resize(); frame(reduced ? 12000 : performance.now()); });
+    frame(reduced ? 12000 : performance.now());
+  })();
+
+  // ------------------------------------------------ rail highlight + keys
+  (function () {
+    const slides = [...document.querySelectorAll(".slide")];
+    const links = [...document.querySelectorAll(".rail a")];
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          links.forEach((l) => l.classList.toggle("live", l.getAttribute("href") === "#" + e.target.id));
+        }
+      });
+    }, { threshold: 0.55 });
+    slides.forEach((s) => io.observe(s));
+
+    addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "PageDown" && e.key !== "PageUp") return;
+      e.preventDefault();
+      const idx = slides.findIndex((s) => {
+        const r = s.getBoundingClientRect();
+        return r.top <= innerHeight * 0.5 && r.bottom > innerHeight * 0.5;
+      });
+      const next = (e.key === "ArrowDown" || e.key === "PageDown")
+        ? Math.min(idx + 1, slides.length - 1)
+        : Math.max(idx - 1, 0);
+      slides[next].scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    });
+  })();
+</script>
+
+</body>
+</html>
