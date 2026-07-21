@@ -10,6 +10,11 @@ public space-surveillance data (Conjunction Data Messages + GP orbital elements)
 verifies collision probability (Pc), classifies orbital-collision risk, and presents everything
 through a REST API and a 3D web dashboard.
 
+**🛰️ Live demo: [http://13.127.244.0](http://13.127.244.0)** — real Space-Track data,
+refreshed every 30 minutes ([API docs](http://13.127.244.0/docs) ·
+[live pipeline](http://13.127.244.0/pipeline)). Runs on a $5 VPS; please be gentle,
+it's rate-limited.
+
 > Named for the Kessler Syndrome — the debris-cascade scenario this class of tooling exists to prevent.
 
 ![KESSLER dashboard — live Space-Track data](docs-assets/dashboard.png)
