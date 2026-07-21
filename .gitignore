@@ -26,3 +26,8 @@ backend/app/data/cache.db-*
 Thumbs.db
 .vscode/
 .idea/
+
+# Python build artifacts
+packages/kessler-toolkit/dist/
+packages/kessler-toolkit/build/
+*.egg-info/
