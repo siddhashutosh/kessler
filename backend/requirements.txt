@@ -8,3 +8,4 @@ httpx>=0.27
 python-dateutil>=2.9
 pytest>=8.2
 anthropic>=0.34 ; python_version >= "3.11"
+eval-type-backport>=0.2 ; python_version < "3.10"

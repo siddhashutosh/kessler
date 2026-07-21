@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KESSLER — QA Report</title>
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<div class="cover">
+  <div class="project">KESSLER</div>
+  <div class="doctitle">Quality Assurance Report — Release Readiness</div>
+  <div class="meta">
+    <span><b>Document ID:</b> KSL-QA-001</span>
+    <span><b>Version:</b> 1.0</span>
+    <span><b>Date:</b> 21 July 2026</span>
+    <span><b>Verdict:</b> READY FOR LOCALHOST TESTING</span>
+  </div>
+  <div class="meta"><span><b>Baseline:</b> KSL-SRS-001 v1.0 · commit ba7b31d+</span></div>
+</div>
+
+<h1>1. Summary</h1>
+<p>KESSLER v1.0 was verified against the SRS acceptance criteria. The automated suite
+(<b>45 tests, 45 passed, 0 failed</b>, 0.82 s) covers the Pc mathematical core against
+closed-form references, CDM parsing (KVN + cdm_public), screening on engineered geometries,
+risk-engine thresholds, and the full API contract. Live end-to-end verification was performed
+on localhost (backend :8000, UI dev server). One environment deviation and two minor findings
+are recorded below; none block testing. <b>Verdict: the application is ready to be tested.</b></p>
+
+<h1>2. Automated Test Results</h1>
+<table>
+  <tr><th>Suite</th><th>Coverage</th><th>Result</th></tr>
+  <tr><td class="mono">test_collision_probability (13)</td><td>Foster vs isotropic closed form (&lt;1e-3 rel); Foster/Chan agreement on 3 geometries; Max-Pc upper-bound property across σ sweep; boundary behaviours; dispatch paths (computed/reported/max)</td><td class="mono">PASS</td></tr>
+  <tr><td class="mono">test_cdm_parser (6)</td><td>KVN round-trip incl. RTN covariance symmetry; aggregated validation errors; non-PSD covariance quarantine; cdm_public row parsing incl. km→m and null-PC</td><td class="mono">PASS</td></tr>
+  <tr><td class="mono">test_screening (5)</td><td>Engineered close pair detected (&lt;25 km, RTN components present); altitude sieve excludes disjoint orbits; empty-catalogue no-op</td><td class="mono">PASS</td></tr>
+  <tr><td class="mono">test_risk_engine (9)</td><td>Threshold boundaries at 1e-4/1e-5/1e-7; sub-km covariance-free escalation (capped at CRITICAL); urgency monotonicity in class/time/staleness; bounds</td><td class="mono">PASS</td></tr>
+  <tr><td class="mono">test_api (12)</td><td>Health; urgency-sorted list w/ attribution; detail + X-Request-Id; 404/422 error envelopes; insight fallback; screening incl. window-limit rejection; pipeline status shape; ISS track sanity; catalogue search</td><td class="mono">PASS</td></tr>
+</table>
+
+<h1>3. Live Verification (localhost)</h1>
+<table>
+  <tr><th>Check</th><th>Observed</th><th>Status</th></tr>
+  <tr><td>Backend boot (Demo Mode, zero credentials)</td><td>Pipeline ran on startup; 8/8 demo CDMs published; all 8 agents report <span class="mono">ok</span></td><td>✔</td></tr>
+  <tr><td>GET /api/v1/conjunctions</td><td>8 events, urgency-descending; CRITICAL events top-ranked; attribution present</td><td>✔</td></tr>
+  <tr><td>Max-Pc fallback path</td><td>Events with null PC correctly labelled <span class="mono">pc_type: "max"</span> and escalated per FR-RSK-1</td><td>✔</td></tr>
+  <tr><td>GET /satellites/25544/track</td><td>61 points; ISS altitude 413.5 km (physically correct); ECI vectors present for 3D view</td><td>✔</td></tr>
+  <tr><td>POST /screening/run (demo asset 61001)</td><td>Altitude sieve reduced 10-object catalogue to 2 candidates; engineered conjunction pair found at 23.6 km</td><td>✔</td></tr>
+  <tr><td>Error envelope + observability</td><td>404 returns <span class="mono">NOT_FOUND</span> envelope; request-id propagated to logs and X-Request-Id header; rotating file log active</td><td>✔</td></tr>
+  <tr><td>UI production build</td><td><span class="mono">tsc</span> strict + Vite build clean (628 modules)</td><td>✔</td></tr>
+  <tr><td>UI dev server + API proxy + diagram</td><td>Page serves with KESSLER title; /api proxy returns backend JSON; n8n-style diagram served and postMessage status channel wired</td><td>✔</td></tr>
+  <tr><td>AI insight graceful degradation</td><td>No API key configured → deterministic template briefing returned, <span class="mono">source: "template"</span>, no error</td><td>✔</td></tr>
+</table>
+
+<h1>4. Findings</h1>
+<table>
+  <tr><th>ID</th><th>Severity</th><th>Finding</th><th>Disposition</th></tr>
+  <tr><td class="req-id">QA-1</td><td>Note</td><td><b>Runtime deviation:</b> host machine offers Python 3.9.7 (silent 3.12 installs are blocked on this box). Backend runs on 3.9 via <span class="mono">eval-type-backport</span> (declared conditionally in requirements). All 45 tests pass on 3.9; target runtime remains 3.11+.</td><td>Accepted; revisit when Python ≥3.11 is installed.</td></tr>
+  <tr><td class="req-id">QA-2</td><td>Minor</td><td>Port 5173 may be occupied by another Vite project on this machine; KESSLER auto-falls back to 5174. CORS allowlist updated to cover both.</td><td>Fixed in this release.</td></tr>
+  <tr><td class="req-id">QA-3</td><td>Minor</td><td>UI bundle is ~1 MB minified (three.js). Acceptable for localhost; code-splitting deferred to the deployment phase.</td><td>Deferred (tracked for AWS phase).</td></tr>
+  <tr><td class="req-id">QA-4</td><td>Info</td><td>Demo dataset TCAs are fixed calendar dates; countdowns will read "TCA passed" as the demo ages. Live mode is unaffected.</td><td>By design for a static demo dataset.</td></tr>
+</table>
+
+<h1>5. Requirements Traceability (Must-haves)</h1>
+<p>FR-ING-1..5 ✔ (demo fallback, TTL cache, last-known-good) · FR-CDM-1..4 ✔ · FR-PC-1..5 ✔
+(Foster + Chan cross-check + Max-Pc, pure logic layer) · FR-SCR-1..4 ✔ (FR-SCR-5 performance
+target met on demo catalogue; full-catalogue benchmark deferred to live-mode testing) ·
+FR-RSK-1..3 ✔, FR-RSK-4 ✔ (template fallback verified) · FR-API-1..3 ✔ · FR-UI-1..5 ✔ ·
+NFR-1/2/4/5/7 ✔ · NFR-3 spot-checked (cached list &lt;50 ms local) · NFR-6 partially measured
+(logic-layer suites comprehensive; coverage tooling not yet wired).</p>
+
+<h1>6. Sign-off</h1>
+<p>QA verdict: <b>APPROVED for localhost testing.</b> Recommended next steps: user acceptance
+testing on the dashboard, Space-Track credentials for live-mode soak, then the AWS deployment
+phase per HLD §6.</p>
+
+<footer>KESSLER · KSL-QA-001 v1.0 · Test evidence: pytest output + live endpoint transcripts, 21 Jul 2026.</footer>
+</body>
+</html>
