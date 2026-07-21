@@ -104,9 +104,9 @@ class SpaceTrackClient:
 
     # ------------------------------------------------------------- queries
     def fetch_cdm_public(self, limit: int = 200) -> list[dict]:
-        """Latest public conjunction messages, soonest TCA first."""
+        """Upcoming public conjunction messages (TCA in the future), soonest first."""
         rows = self._query(
-            f"/basicspacedata/query/class/cdm_public/orderby/TCA asc/limit/{limit}/format/json"
+            f"/basicspacedata/query/class/cdm_public/TCA/%3Enow/orderby/TCA asc/limit/{limit}/format/json"
         )
         logger.info("Space-Track: fetched %d cdm_public rows", len(rows))
         return rows

@@ -5,11 +5,13 @@ import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.core.config import settings
@@ -115,13 +117,34 @@ async def unhandled_error_handler(request: Request, exc: Exception):
 
 app.include_router(router)
 
+# Single-service deployment: when the built UI is present (ui/dist), serve it
+# from this process — API routes above always win; unknown paths fall back to
+# the SPA's index.html for client-side routing.
+_UI_DIST = Path(__file__).resolve().parents[2] / "ui" / "dist"
 
-@app.get("/")
-def root():
-    return {
-        "name": "KESSLER",
-        "version": settings.version,
-        "docs": "/docs",
-        "api": "/api/v1",
-        "attribution": "Orbital data courtesy of Space-Track.org (USSPACECOM) and CelesTrak.",
-    }
+if (_UI_DIST / "index.html").exists():
+    app.mount("/assets", StaticFiles(directory=_UI_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str):
+        candidate = (_UI_DIST / full_path).resolve()
+        if (
+            full_path
+            and candidate.is_file()
+            and candidate.is_relative_to(_UI_DIST.resolve())
+        ):
+            return FileResponse(candidate)
+        return FileResponse(_UI_DIST / "index.html")
+
+    logger.info("Serving UI from %s", _UI_DIST)
+else:
+
+    @app.get("/")
+    def root():
+        return {
+            "name": "KESSLER",
+            "version": settings.version,
+            "docs": "/docs",
+            "api": "/api/v1",
+            "attribution": "Orbital data courtesy of Space-Track.org (USSPACECOM) and CelesTrak.",
+        }

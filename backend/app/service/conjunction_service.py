@@ -37,6 +37,28 @@ _ATTRIBUTION = (
 )
 
 
+def _dedupe_cdms(cdms: list[Cdm]) -> list[Cdm]:
+    """Collapse duplicate perspectives (A x B / B x A) and superseded updates.
+
+    Space-Track publishes one cdm_public row per object perspective and a new
+    row per screening update. Key on the unordered object pair + TCA (rounded
+    to the second); keep the most recently CREATED row.
+    """
+    best: dict[tuple, Cdm] = {}
+    for cdm in cdms:
+        pair = tuple(sorted((cdm.sat1.designator, cdm.sat2.designator)))
+        key = (pair, cdm.tca.replace(microsecond=0))
+        current = best.get(key)
+        if current is None:
+            best[key] = cdm
+            continue
+        # missing CREATED ranks oldest — a dated row always supersedes it
+        oldest = datetime.min.replace(tzinfo=timezone.utc)
+        if (cdm.created or oldest) > (current.created or oldest):
+            best[key] = cdm
+    return list(best.values())
+
+
 class ConjunctionService:
     def __init__(self):
         self.cache = CacheService(settings.data_dir / "cache.db")
@@ -116,10 +138,15 @@ class ConjunctionService:
                     quarantined += 1
                     logger.warning("CDM quarantined (%s): %s",
                                    row.get("CDM_ID", "?"), exc.detail)
+            deduped = len(cdms)
+            cdms = _dedupe_cdms(cdms)
+            deduped -= len(cdms)
             st["items"] = len(cdms)
             if quarantined:
                 st["status"] = "degraded"
                 st["error"] = f"{quarantined} record(s) quarantined"
+            if deduped:
+                logger.info("Parser: collapsed %d duplicate/superseded CDM rows", deduped)
 
         published = 0
         with self.pipeline.stage("pc") as st_pc, self.pipeline.stage("risk") as st_risk, \
