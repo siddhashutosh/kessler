@@ -29,12 +29,12 @@ class Settings(BaseSettings):
     log_dir: Path = BACKEND_DIR / "logs"
 
     # CON-1: cache-first; GP never refetched inside 1 h, CDM inside 30 min
-    gp_ttl_seconds: int = 3600
-    cdm_ttl_seconds: int = 1800
+    gp_ttl_seconds: int = 21600      # 6 h — CelesTrak is IP-rate-limited; be gentle
+    cdm_ttl_seconds: int = 14400     # 4 h — public CDMs update a few times/day
 
     screening_max_window_hours: int = 72
     default_hbr_m: float = 20.0
-    pipeline_refresh_seconds: int = 1800
+    pipeline_refresh_seconds: int = 14400   # 4 h — was 30 min (too aggressive)
 
     @property
     def effective_demo_mode(self) -> bool:
